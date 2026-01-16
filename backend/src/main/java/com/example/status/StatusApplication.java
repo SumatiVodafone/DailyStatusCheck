@@ -1,13 +1,16 @@
 package com.example.status;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import jakarta.annotation.PostConstruct;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.mapping.Document;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.web.bind.annotation.*;
 
-import java.io.File;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.*;
 
@@ -17,58 +20,15 @@ import java.util.*;
 public class StatusApplication {
 
     private static final String TOKEN = "witbe-secret-token";
-    private static final String DATA_FILE = "data/store.json";
 
-    private final ObjectMapper mapper = new ObjectMapper()
-            .enable(SerializationFeature.INDENT_OUTPUT);
-
-    private final Set<String> boxRegistry = new LinkedHashSet<>();
-    private final Map<String, Map<String, Object>> dailyRuns = new HashMap<>();
+    @Autowired
+    private MongoTemplate mongoTemplate;
 
     public static void main(String[] args) {
         SpringApplication.run(StatusApplication.class, args);
     }
 
-    /* -------------------- INIT & SAVE -------------------- */
-
-    @PostConstruct
-    public void loadData() {
-        try {
-            File file = new File(DATA_FILE);
-            if (!file.exists()) return;
-
-            Map<String, Object> root = mapper.readValue(file, Map.class);
-
-            boxRegistry.addAll((List<String>) root.getOrDefault("boxes", List.of()));
-            dailyRuns.putAll((Map<String, Map<String, Object>>) root.getOrDefault("runs", Map.of()));
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
-
-    private void saveData() {
-        try {
-            new File("data").mkdirs();
-
-            Map<String, Object> root = new LinkedHashMap<>();
-            root.put("boxes", boxRegistry);
-            root.put("runs", dailyRuns);
-
-            mapper.writeValue(new File(DATA_FILE), root);
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
-
-    /* -------------------- HELPERS -------------------- */
-
-    private Map<String, Object> initDate(String date) {
-        return dailyRuns.computeIfAbsent(date, d -> {
-            Map<String, Object> obj = new HashMap<>();
-            obj.put("runs", new ArrayList<>());
-            return obj;
-        });
-    }
+    /* -------------------- AUTH -------------------- */
 
     private void checkAuth(String token) {
         if (!TOKEN.equals(token)) {
@@ -78,41 +38,77 @@ public class StatusApplication {
 
     /* -------------------- BOX APIs -------------------- */
 
+    /**
+     * Optional manual box registration
+     * (Auto-registration also happens via /status/run)
+     */
     @PostMapping("/boxes/register")
     public String registerBox(
             @RequestHeader("X-API-TOKEN") String token,
             @RequestBody Map<String, String> payload) {
 
         checkAuth(token);
-        boxRegistry.add(payload.get("box"));
-        saveData();
+
+        String box = payload.get("box");
+
+        Query q = new Query(Criteria.where("box").is(box));
+        if (!mongoTemplate.exists(q, BoxRecord.class)) {
+            BoxRecord br = new BoxRecord();
+            br.box = box;
+            br.firstSeen = LocalDate.now().toString();
+            mongoTemplate.save(br);
+        }
+
         return "Box registered";
     }
 
     @GetMapping("/boxes")
-    public Set<String> getBoxes() {
-        return boxRegistry;
+    public List<String> getBoxes() {
+        return mongoTemplate.findAll(BoxRecord.class)
+                .stream()
+                .map(b -> b.box)
+                .sorted()
+                .toList();
     }
 
     /* -------------------- STATUS APIs -------------------- */
 
     @PostMapping("/status/run")
-    public String addRun(
+    public Map<String, Object> addRun(
             @RequestHeader("X-API-TOKEN") String token,
             @RequestBody Map<String, Object> payload) {
 
         checkAuth(token);
 
-        String date = (String) payload.getOrDefault(
-                "date", LocalDate.now().toString());
+        String date = payload.getOrDefault(
+                "date", LocalDate.now().toString()).toString();
 
-        Map<String, Object> dateObj = initDate(date);
-        List<Map<String, Object>> runs =
-                (List<Map<String, Object>>) dateObj.get("runs");
+        String box = payload.get("box").toString();
+        String release = payload.get("release").toString();
+        String scenario = payload.get("scenario").toString();
+        Object value = payload.get("value");
 
-        runs.add(new LinkedHashMap<>(payload));
-        saveData();
-        return "Run recorded";
+        /* ---- auto-register box ---- */
+        Query boxQuery = new Query(Criteria.where("box").is(box));
+        if (!mongoTemplate.exists(boxQuery, BoxRecord.class)) {
+            BoxRecord br = new BoxRecord();
+            br.box = box;
+            br.firstSeen = date;
+            mongoTemplate.save(br);
+        }
+
+        /* ---- save run ---- */
+        RunRecord run = new RunRecord();
+        run.date = date;
+        run.box = box;
+        run.release = release;
+        run.scenario = scenario;
+        run.value = value;
+        run.timestamp = Instant.now();
+
+        mongoTemplate.save(run);
+
+        return Map.of("status", "Run recorded");
     }
 
     @GetMapping("/status")
@@ -123,6 +119,36 @@ public class StatusApplication {
                 ? LocalDate.now().toString()
                 : date;
 
-        return initDate(finalDate);
+        Query query = new Query(Criteria.where("date").is(finalDate));
+        List<RunRecord> runs = mongoTemplate.find(query, RunRecord.class);
+
+        return Map.of(
+                "date", finalDate,
+                "runs", runs
+        );
     }
+}
+
+/* ===================== MONGO DOCUMENTS ===================== */
+
+@Document(collection = "runs")
+class RunRecord {
+    @Id
+    public String id;
+
+    public String date;
+    public String box;
+    public String release;
+    public String scenario;
+    public Object value;
+    public Instant timestamp;
+}
+
+@Document(collection = "boxes")
+class BoxRecord {
+    @Id
+    public String id;
+
+    public String box;
+    public String firstSeen;
 }
