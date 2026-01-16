@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Daily Scenario Status</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: linear-gradient(120deg, #89f7fe, #66a6ff);
+            padding: 20px;
+        }
+
+        h1 {
+            text-align: center;
+            color: #fff;
+        }
+
+        .controls {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        input[type="date"] {
+            padding: 8px;
+            font-size: 16px;
+        }
+
+        table {
+            margin: auto;
+            border-collapse: collapse;
+            width: 70%;
+            background: #fff;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.2);
+        }
+
+        th {
+            background: #4CAF50;
+            color: white;
+            padding: 12px;
+        }
+
+        td {
+            padding: 10px;
+            text-align: center;
+        }
+
+        .no-run {
+            background: #ffcccc;
+            color: #b30000;
+            font-weight: bold;
+        }
+
+        .ran {
+            background: #ccffcc;
+            color: #006600;
+            font-weight: bold;
+        }
+    </style>
+</head>
+
+<body>
+
+<h1>🚀 Daily Run Status Dashboard</h1>
+
+<div class="controls">
+    <label>Select Date: </label>
+    <input type="date" id="datePicker" />
+</div>
+
+<table>
+    <thead>
+        <tr>
+            <th>Scenario</th>
+            <th>Status</th>
+        </tr>
+    </thead>
+    <tbody id="tableBody"></tbody>
+</table>
+
+<script>
+const API = "/api/status";
+const tableBody = document.getElementById("tableBody");
+const datePicker = document.getElementById("datePicker");
+
+// Set today as default
+const today = new Date().toISOString().split("T")[0];
+datePicker.value = today;
+
+async function loadData() {
+    const date = datePicker.value;
+    const res = await fetch(`${API}?date=${date}`);
+    const data = await res.json();
+
+    tableBody.innerHTML = "";
+
+    Object.keys(data).forEach(scenario => {
+        const value = data[scenario];
+        const isRun = value !== "No Run";
+
+        const row = `
+            <tr>
+                <td>${scenario}</td>
+                <td class="${isRun ? 'ran' : 'no-run'}">
+                    ${value}
+                </td>
+            </tr>
+        `;
+        tableBody.innerHTML += row;
+    });
+}
+
+datePicker.addEventListener("change", loadData);
+loadData();
+</script>
+
+</body>
+</html>
