@@ -1,113 +1,183 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Daily Scenario Status</title>
+    <title>Daily Run Status</title>
 
     <style>
         body {
-            font-family: Arial, sans-serif;
-            background: linear-gradient(120deg, #89f7fe, #66a6ff);
+            font-family: "Segoe UI", Arial, sans-serif;
+            background: #f8fafc;
             padding: 20px;
+            color: #334155;
         }
 
         h1 {
             text-align: center;
-            color: #fff;
+            margin-bottom: 20px;
         }
 
         .controls {
             text-align: center;
-            margin-bottom: 20px;
+            margin-bottom: 30px;
         }
 
         input[type="date"] {
-            padding: 8px;
-            font-size: 16px;
+            padding: 8px 12px;
+            border-radius: 6px;
+            border: 1px solid #cbd5f5;
+            background: #eef2ff;
+        }
+
+        .release {
+            margin-bottom: 40px;
+        }
+
+        .release h2 {
+            background: #e0e7ff;
+            color: #3730a3;
+            padding: 10px 14px;
+            border-radius: 8px;
         }
 
         table {
-            margin: auto;
+            width: 100%;
             border-collapse: collapse;
-            width: 70%;
-            background: #fff;
+            background: white;
+            margin-top: 10px;
             border-radius: 10px;
             overflow: hidden;
-            box-shadow: 0 10px 20px rgba(0,0,0,0.2);
+            box-shadow: 0 8px 20px rgba(0,0,0,0.05);
         }
 
-        th {
-            background: #4CAF50;
-            color: white;
-            padding: 12px;
-        }
-
-        td {
+        th, td {
             padding: 10px;
+            border: 1px solid #e5e7eb;
             text-align: center;
         }
 
+        th {
+            background: #f1f5f9;
+            font-weight: 600;
+        }
+
+        td.box {
+            font-weight: 600;
+            background: #fafafa;
+        }
+
         .no-run {
-            background: #ffcccc;
-            color: #b30000;
-            font-weight: bold;
+            background: #fde2e4;
+            color: #9f1239;
+            font-weight: 600;
         }
 
         .ran {
-            background: #ccffcc;
-            color: #006600;
-            font-weight: bold;
+            background: #dcfce7;
+            color: #166534;
+            font-weight: 600;
+        }
+
+        .summary {
+            margin-top: 8px;
+            font-weight: 600;
+            color: #475569;
+        }
+
+        .empty {
+            color: #94a3b8;
         }
     </style>
 </head>
 
 <body>
 
-<h1>🚀 Daily Run Status Dashboard</h1>
+<h1>🌸 Daily Run Status Dashboard</h1>
 
 <div class="controls">
-    <label>Select Date: </label>
-    <input type="date" id="datePicker" />
+    <b>Date:</b>
+    <input type="date" id="datePicker">
 </div>
 
-<table>
-    <thead>
-        <tr>
-            <th>Scenario</th>
-            <th>Status</th>
-        </tr>
-    </thead>
-    <tbody id="tableBody"></tbody>
-</table>
+<div id="dashboard"></div>
 
 <script>
-const API = "/api/status";
-const tableBody = document.getElementById("tableBody");
+const boxesApi = "/api/boxes";
+const statusApi = "/api/status";
+
+const dashboard = document.getElementById("dashboard");
 const datePicker = document.getElementById("datePicker");
 
-// Set today as default
-const today = new Date().toISOString().split("T")[0];
-datePicker.value = today;
+// default today
+datePicker.value = new Date().toISOString().split("T")[0];
 
 async function loadData() {
+    dashboard.innerHTML = "";
     const date = datePicker.value;
-    const res = await fetch(`${API}?date=${date}`);
-    const data = await res.json();
 
-    tableBody.innerHTML = "";
+    const boxes = await (await fetch(boxesApi)).json();
+    const status = await (await fetch(`${statusApi}?date=${date}`)).json();
+    const runs = status.runs || [];
 
-    Object.keys(data).forEach(scenario => {
-        const value = data[scenario];
-        const isRun = value !== "No Run";
+    // group runs by release
+    const releases = {};
+    runs.forEach(r => {
+        if (!releases[r.release]) releases[r.release] = [];
+        releases[r.release].push(r);
+    });
 
-        const row = `
-            <tr>
-                <td>${scenario}</td>
-                <td class="${isRun ? 'ran' : 'no-run'}">
-                    ${value}
-                </td>
-            </tr>
-        `;
-        tableBody.innerHTML += row;
+    if (Object.keys(releases).length === 0) {
+        dashboard.innerHTML = "<p class='empty'>No runs for this date.</p>";
+        return;
+    }
+
+    Object.keys(releases).forEach(release => {
+        const releaseRuns = releases[release];
+
+        const scenarios = [...new Set(releaseRuns.map(r => r.scenario))];
+
+        const section = document.createElement("div");
+        section.className = "release";
+        section.innerHTML = `<h2>Release: ${release}</h2>`;
+
+        const table = document.createElement("table");
+
+        let thead = "<tr><th>Box</th>";
+        scenarios.forEach(s => thead += `<th>${s}</th>`);
+        thead += "</tr>";
+        table.innerHTML = `<thead>${thead}</thead>`;
+
+        const tbody = document.createElement("tbody");
+
+        boxes.forEach(box => {
+            const row = document.createElement("tr");
+            row.innerHTML = `<td class="box">${box}</td>`;
+
+            scenarios.forEach(scenario => {
+                const run = releaseRuns.find(r =>
+                    r.box === box && r.scenario === scenario
+                );
+
+                const value = run ? run.value : "No Run";
+                const cls = value === "No Run" ? "no-run" : "ran";
+
+                row.innerHTML += `<td class="${cls}">${value}</td>`;
+            });
+
+            tbody.appendChild(row);
+        });
+
+        table.appendChild(tbody);
+        section.appendChild(table);
+
+        // ✅ SUMMARY (correct place)
+        const activeBoxes = new Set(releaseRuns.map(r => r.box));
+        const summary = document.createElement("p");
+        summary.className = "summary";
+        summary.innerHTML =
+            `Summary: ${activeBoxes.size} / ${boxes.length} boxes ran at least one scenario`;
+
+        section.appendChild(summary);
+        dashboard.appendChild(section);
     });
 }
 
